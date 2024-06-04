@@ -32,6 +32,24 @@ internal static partial class Utility
     }
 
     [global::System.AttributeUsage(global::System.AttributeTargets.Method, AllowMultiple = false)]
+    internal sealed class StringEmbedAttribute : global::System.Attribute
+    {
+        public string Path { get; }
+        public string? EncodingName { get; }
+
+        public StringEmbedAttribute(string path)
+        {
+            Path = path;
+        }
+
+        public StringEmbedAttribute(string path, string encodingName)
+        {
+            Path = path;
+            EncodingName = encodingName;
+        }
+    }
+
+    [global::System.AttributeUsage(global::System.AttributeTargets.Method, AllowMultiple = false)]
     internal sealed class FolderEmbedAttribute : global::System.Attribute
     {
         public string Path { get; private set; }
@@ -210,6 +228,20 @@ internal static partial class Utility
         Footer(buffer);
     }
 
+    public static void ProcessString(StringBuilder buffer, IMethodSymbol method, string filePath, Encoding? encoding, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var content = encoding is null ? File.ReadAllText(filePath) : File.ReadAllText(filePath, encoding);
+        Header(buffer, method);
+        buffer.Append("()").AppendLine();
+        buffer.Append("        {").AppendLine();
+        buffer.Append("            return \"\"\"\"\"\"").AppendLine();
+        buffer.Append(content).AppendLine();
+        buffer.Append("\"\"\"\"\"\";").AppendLine();
+        buffer.Append("        }");
+        Footer(buffer);
+    }
+
     private static void Footer(StringBuilder buffer)
     {
         buffer.AppendLine().Append("    }").AppendLine().Append('}').AppendLine().AppendLine();
@@ -241,7 +273,7 @@ internal static partial class Utility
         buffer.Append("    {").AppendLine();
         buffer.Append("        ");
         PrintAccessibility(buffer, method.DeclaredAccessibility);
-        buffer.Append(" static partial global::System.ReadOnlySpan<byte> ");
+        buffer.Append($" static partial {method.ReturnType.ToDisplayString()} ");
         buffer.Append(method.Name);
     }
 

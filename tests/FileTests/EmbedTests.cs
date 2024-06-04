@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Text;
 using EmbedResourceCSharp;
 using Xunit;
 
@@ -9,10 +10,17 @@ namespace FileTests
     public partial class EmbedTests
     {
         private static string GetCurrentFilePath([CallerFilePath] string path = "") => path;
+
         private readonly string currentFolder;
 
         [FileEmbed("a.txt")]
         private static partial ReadOnlySpan<byte> GetA();
+
+        [StringEmbed("a.txt")]
+        private static partial string GetStringDefaultEncoding();
+
+        [StringEmbed("a.txt", "utf-8")]
+        private static partial string GetStringUtf8();
 
         public EmbedTests()
         {
@@ -24,6 +32,13 @@ namespace FileTests
         {
             var original = File.ReadAllBytes(Path.Combine(currentFolder, "./a.txt"));
             Assert.True(GetA().SequenceEqual(original.AsSpan()));
+        }
+
+        [Fact]
+        public void StringEmbedTest()
+        {
+            var original = File.ReadAllText(Path.Combine(currentFolder, "./a.txt"));
+            Assert.Equal(original, GetStringDefaultEncoding());
         }
 
         [Fact]

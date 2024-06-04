@@ -19,4 +19,12 @@ internal sealed class DiagnosticsHelper
         category: "ResourceEmbedCSharp",
         DiagnosticSeverity.Error,
         true);
+
+    internal static readonly DiagnosticDescriptor EncodingNotFoundError = new(
+        id: "EMBED003",
+        title: "Encoding Not Found",
+        messageFormat: "Encoding '{0}' is not a supported encoding name",
+        category: "ResourceEmbedCSharp",
+        DiagnosticSeverity.Error,
+        true);
 }

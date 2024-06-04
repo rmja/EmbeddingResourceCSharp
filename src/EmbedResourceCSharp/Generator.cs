@@ -26,6 +26,13 @@ public sealed class Generator : IIncrementalGenerator
                 return compilation.GetTypeByMetadataName("EmbedResourceCSharp.FileEmbedAttribute");
             })
             .WithComparer(SymbolEqualityComparer.Default);
+        var str = context.CompilationProvider
+            .Select(static (compilation, token) =>
+            {
+                token.ThrowIfCancellationRequested();
+                return compilation.GetTypeByMetadataName("EmbedResourceCSharp.StringEmbedAttribute");
+            })
+            .WithComparer(SymbolEqualityComparer.Default);
         var folder = context.CompilationProvider
             .Select(static (compilation, token) =>
             {
@@ -37,8 +44,12 @@ public sealed class Generator : IIncrementalGenerator
             .CreateSyntaxProvider(Predicate, Transform)
             .Combine(file)
             .Select(PostTransformFile)
-            .Where(x => x.Method is not null && x.Path is not null)!
-            .WithComparer(FileAttributeComparer.Instance);
+            .Where(x => x.Method is not null && x.Path is not null)!;
+        var strings = context.SyntaxProvider
+            .CreateSyntaxProvider(Predicate, Transform)
+            .Combine(str)
+            .Select(PostTransformString)
+            .Where(x => x.Method is not null && x.Path is not null);
         var folders = context.SyntaxProvider
             .CreateSyntaxProvider(Predicate, Transform)
             .Combine(folder)
@@ -46,6 +57,7 @@ public sealed class Generator : IIncrementalGenerator
             .Where(x => x.Method is not null);
 
         context.RegisterSourceOutput(files.Combine(options), GenerateFileEmbed);
+        context.RegisterSourceOutput(strings.Combine(options), GenerateStringEmbed);
         context.RegisterSourceOutput(folders.Combine(options), GenerateFolderEmbed!);
     }
 
@@ -89,6 +101,36 @@ public sealed class Generator : IIncrementalGenerator
             if (SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, type))
             {
                 return (method, attribute.ConstructorArguments[0].Value as string);
+            }
+        }
+
+        return default;
+    }
+
+    private (IMethodSymbol? Method, string? Path, string? EncodingName) PostTransformString((IMethodSymbol? Method, INamedTypeSymbol? Type) pair, CancellationToken token)
+    {
+        var type = pair.Type;
+        if (type is null)
+        {
+            return default;
+        }
+
+        var method = pair.Method;
+        if (method is null)
+        {
+            return default;
+        }
+
+        foreach (var attribute in method.GetAttributes())
+        {
+            token.ThrowIfCancellationRequested();
+            if (SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, type))
+            {
+                var path = attribute.ConstructorArguments[0].Value as string;
+                var encodingName = attribute.ConstructorArguments.Length == 2
+                    ? attribute.ConstructorArguments[1].Value as string
+                    : null;
+                return (method, path, encodingName);
             }
         }
 
@@ -204,6 +246,69 @@ SUCCESS:
 
         var source = builder.ToString();
         var hintName = Utility.CalcHintName(builder, method, ".file.g.cs");
+        context.AddSource(hintName, source);
+    }
+
+    private void GenerateStringEmbed(SourceProductionContext context, ((IMethodSymbol Method, string Path, string? EncodingName) Left, Options Options) pair)
+    {
+        if (string.IsNullOrWhiteSpace(pair.Options.ProjectDir))
+        {
+            return;
+        }
+
+        StringBuilder builder;
+
+        var token = context.CancellationToken;
+        token.ThrowIfCancellationRequested();
+        var method = pair.Left.Method;
+        var path = pair.Left.Path;
+        var encodingName = pair.Left.EncodingName;
+
+        var filePath = Path.Combine(pair.Options.ProjectDir, path);
+        if (!File.Exists(filePath))
+        {
+            var location = Location.None;
+            if (method.AssociatedSymbol is { Locations: { Length: > 0 } locations })
+            {
+                location = locations[0];
+            }
+
+            context.ReportDiagnostic(Diagnostic.Create(DiagnosticsHelper.FileNotFoundError, location, filePath));
+            return;
+        }
+
+        Encoding? encoding = null;
+        if (encodingName is not null)
+        {
+            try
+            {
+                encoding = Encoding.GetEncoding(encodingName);
+            }
+            catch (ArgumentException)
+            {
+                var location = Location.None;
+                if (method.AssociatedSymbol is { Locations: { Length: > 0 } locations })
+                {
+                    location = locations[0];
+                }
+
+                context.ReportDiagnostic(Diagnostic.Create(DiagnosticsHelper.EncodingNotFoundError, location, encodingName));
+                return;
+            }
+        }
+
+        builder = new StringBuilder();
+        if (pair.Options.IsDesignTimeBuild)
+        {
+            Utility.ProcessFileDesignTimeBuild(builder, method);
+        }
+        else
+        {
+            Utility.ProcessString(builder, method, filePath, encoding, token);
+        }
+
+        var source = builder.ToString();
+        var hintName = Utility.CalcHintName(builder, method, ".string.g.cs");
         context.AddSource(hintName, source);
     }
 
